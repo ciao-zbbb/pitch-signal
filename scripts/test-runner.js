@@ -64,6 +64,8 @@ const TEST_FILES = [
   'test-market-value-signal.js',
   'test-prediction-market-ui.js',
   'test-shin-devig.js',
+  // 缺陷修复回归测试
+  'test-knockout-writeback.js',
 ];
 
 const filter = process.argv.includes('--match')
