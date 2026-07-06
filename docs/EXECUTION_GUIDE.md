@@ -33,11 +33,12 @@
 | `p2/teamcontext-news` | P2-5 新闻注入 |
 | `p2/bot-kb` | P2-6 Bot 知识库 |
 | `p3/track-b-calibration` | P3-1 压力校准 |
-| `p3/calibration-panel` | P3-2 校准报告面板 |
+| ~~`p3/calibration-panel`~~ | P3-2 校准报告面板 —— ✅ 已完成，见下方 P3 章节说明，不再派工 |
 | `p3/penalty-model` | P3-3 点球模型 |
 | `p3/lineup-ci` | P3-4 阵容 CI |
-| `p3/backtest-expansion` | P3-5 回测样本 + param-sweep |
+| ~~`p3/backtest-expansion`~~ | P3-5 回测样本 + param-sweep —— ✅ 已完成，见下方 P3 章节说明，不再派工 |
 | `p3/corner-backtest` | P3-6 角球准确率回测 |
+| `fix/knockout-score-writeback` | P0-3-补 淘汰赛比分回写缺口 |
 | `chore/a11y` | 贯穿 a11y/色盲 |
 | `chore/new-module-tests` | 贯穿 新模块测试 |
 | `docs/dataflow-mermaid` | 贯穿 README 数据流图 |
@@ -220,53 +221,43 @@
 
 ---
 
+> **2026-07-07 更新**：P3-2/P3-5 已完成，不再是待派工项（见下方说明）。P3-3/P3-4 已实现，PR 待合并（[#5](https://github.com/ciao-zbbb/pitch-signal/pull/5)、[#6](https://github.com/ciao-zbbb/pitch-signal/pull/6)），具体规格见各自 PR 描述。P3-1 的检测 bug 已修（PR #7），但置换检验分析本身还没跑；P3-6 框架已完成（PR #4），真实数据评估还在等生产样本量。**关键前提——本地样本量不能代表生产环境**：本地 `data/predictions.db` 是开发库，判断"样本够不够"必须去生产环境核实（导出快照最安全，避免误连生产连接池）。
+
 ### P3-1 · `p3/track-b-calibration`
-- **目的**：压力指数当前只展示不影响概率，须回测验证后升级。
-- **方式**：从 `match_live_stats` 拉 `sustained_pressure_alert`，统计 alert 后 5/10/15 分钟进球率 vs base rate；显著才给 `live-reprice.js` lambdaRemaining 加 calibrated 系数（≤+15%）。
-- **边界**：IN = 回测分析 + 通过后才实现加权；OUT = 未通过验证**不得**改概率。**统计**：用置换检验/控制整体错误率，防多重比较，而非裸 p<0.05。
-- **前置核实**：需 P0-3 积累的实际结果 + 足够 alert 样本。
-- **核查**：分析报告含置换检验 p 值与效应量；加权仅在显著时启用且 ≤+15%。
-- **依赖**：P0-3、足够世界杯数据。
+- **目的**：压力指数当前只展示不影响概率（[pressure-index.js:6](../lib/services/pressure-index.js:6)），须回测验证后升级。
+- **现状**：数据采集端已就绪且检测 bug 已修——`detectSurge` 原本"从最新往回数、遇第一个低于阈值就 break"的严格连续计数，被压力指数逐分钟 delta 的单分钟低谷打断导致系统性漏报，生产实测长期为 **0 条** `sustained_pressure_alert`；PR #7（`fix/matches-seed-surge`）改成"最近 5 快照中至少 3 个 ≥65"的滑动窗口 + 补"期间未进球"否决，已上线，样本会开始积累。
+- **方式**：从 `match_moments`（`type='sustained_pressure_alert'`）拉 alert，统计 alert 后 5/10/15 分钟进球率 vs base rate；显著才给 `live-reprice.js` lambdaRemaining 加 calibrated 系数（≤+15%）。
+- **边界**：IN = 回测分析 + 通过后才实现加权；OUT = 未通过验证**不得**改概率，系数不得超过 +15%。**统计**：用置换检验/控制整体错误率，防多重比较，而非裸 p<0.05。
+- **前置核实**：去生产环境核实 PR #7 上线后 `sustained_pressure_alert` 实际积累了多少条 + 对应比赛终场比分是否已回写（见下方 P0-3-补，淘汰赛比分回写目前仍有缺口，会影响这里能凑到的样本）。
+- **核查**：分析报告含置换检验 p 值与效应量；加权仅在显著时启用且 ≤+15%；`npm test` 绿。
+- **依赖**：P0-3（终场比分回写，注意淘汰赛缺口见 P0-3-补）、足够世界杯数据（生产环境核实）。
 
-### P3-2 · `p3/calibration-panel`
-- **目的**：差异化卖点——展示模型是否过度自信。
-- **方式**：`lib/backtest-calibration.js` 读 `prediction_snapshots` 对比结果算 Brier + 10 桶校准曲线；`GET /api/calibration-report`；前端「预测」页加「模型表现」子 Tab。
-- **边界**：IN = Brier/校准曲线/方向正确率；OUT = 不改预测引擎。
-- **前置核实**：`prediction_snapshots` 字段是否够算 Brier。
-- **核查**：已知样本手算 Brier 与接口一致；校准曲线 SVG 渲染。
-- **依赖**：P0-3（实际结果）。
+### ~~P3-2 · `p3/calibration-panel`~~（✅ 已完成）
+- **实现**：`lib/backtest-calibration.js`（`fitPlatt()` + `buildCalibrationReport()`）读 `prediction_snapshots` JOIN `post_match_reviews` 算 Brier + 10 桶校准曲线；`GET /api/calibration-report`（`lib/routes/calibration.js`）；`scripts/test-calibration-report.js` 通过，含样本不足时 Platt 正确标记 `unavailable` 的断言。
 
-### P3-3 · `p3/penalty-model`
-- **目的**：点球当前 50/50 对称假设。
-- **方式**：整理历史点球命中率 → `data/penalty-shootout-stats.json`；改 `live-reprice.js` 的 `penaltyHomeWin` 用队伍历史命中率。
-- **边界**：IN = 数据 + 命中率替换；OUT = 不改加时/常规时间逻辑。
-- **前置核实**：`penaltyHomeWin` 现有计算位置。
-- **核查**：两队命中率不同则概率非 50/50 且方向正确；缺数据回退 0.5。
-- **依赖**：无。
+### P3-3 · `p3/penalty-model`（✅ 已完成，PR 待合并 [#5](https://github.com/ciao-zbbb/pitch-signal/pull/5)）
+详见 PR #5 描述：历史点球命中率（76 队，RSSSF）替换 `live-reprice.js:92-93` 硬编码 50/50，`test-penalty-model.js`（19 断言）通过。
 
-### P3-4 · `p3/lineup-ci`
-- **目的**：`calcConfidenceInterval()` 已吃 `lineupUncertainty`（[prediction.js:427](../lib/prediction.js:427)），缺数据源驱动。
-- **方式**：**先核实**首发确认值存于何表/字段（`lineups-sync.js` 已在赛前 50 分钟同步，但 `pre_match_snapshots.has_confirmed_lineup` 未见于 schema）；建立后换算成 `lineupUncertainty` 传入预测链路。
-- **边界**：IN = 数据源对接 + 传参；OUT = 不改 CI 公式系数本身。
-- **前置核实**：**关键**——lineup 确认状态当前是否落库、落在哪。
-- **核查**：首发公布后该场 CI 收窄、未公布时维持宽。
-- **依赖**：lineups-sync 数据落库情况。
+### P3-4 · `p3/lineup-ci`（✅ 已完成，PR 待合并 [#6](https://github.com/ciao-zbbb/pitch-signal/pull/6)）
+详见 PR #6 描述：`PredictionService.predictMatch()` 接入 `lineups-source.js` 的 `getLineups()` 判定首发是否公布，驱动 `lineupUncertainty`，`test-lineup-ci.js`（8 断言）通过。
 
-### P3-5 · `p3/backtest-expansion`
-- **目的**：[backtest-backlog.md:5](backtest-backlog.md:5) 仅 128 场，显著性不足；`param-sweep.js` 无上线工作流。
-- **方式**：导入 Euro 2020/2024、Copa 2021 至 300+ 场（标记来源）；建立定期跑 `param-sweep.js` + 一键更新生产参数的工作流。
-- **边界**：IN = 数据导入（格式兼容现有 `data/history/`）+ 寻优工作流；OUT = 不引入 AUTO_CALIBRATION（保持关闭）。
-- **前置核实**：`data/history/worldcup_*.json` 格式。
-- **核查**：回测样本 ≥300；param-sweep 输出最优参数并可一键写入配置。
-- **依赖**：无。
+### ~~P3-5 · `p3/backtest-expansion`~~（✅ 已完成，路径与原计划不同）
+原计划是"混入 Euro/Copa 到 300+ 场"；实际做法是全量 1930-2022 世界杯正赛 964 场 + martj42 49k 场用于 Elo 热启动，详见 [REMAINING_FEATURES_PLAN.md](REMAINING_FEATURES_PLAN.md) P3-5 行与 [prediction-methodology-review.md](prediction-methodology-review.md)。
 
-### P3-6 · `p3/corner-backtest`
-- **目的**：角球模型已上线（[matchup.js:805](../lib/routes/matchup.js:805)），需准确率评估。
-- **方式**：累计 20-48 场后统计方向正确率与 MAE（目标 <2.0），据此调风格系数。
-- **边界**：IN = 评估脚本 + 系数微调；OUT = 不重写角球模型。
-- **前置核实**：实际角球结果数据来源。
-- **核查**：评估报告含 MAE 与方向正确率。
-- **依赖**：足够已结束比赛。
+### P3-6 · `p3/corner-backtest`（🟡 框架已完成，PR 待合并 [#4](https://github.com/ciao-zbbb/pitch-signal/pull/4)，真实评估待样本量）
+- **现状**：`lib/corner-model.js` 已把角球预测公式提取为独立模块（纯提取，公式未变）；`scripts/test-corner-backtest.js` 五段评估（单元/真实DB只读/合成/敏感度/边界）框架已完成，合成数据 MAE 1.90 < 2.0 目标，但这只是框架自检，不代表真实预测准确率。
+- **前置核实**：生产环境 `match_live_stats` 表已有多少场 `home_corners`/`away_corners` 是非零真实终场值（本地库不能代表）——达到 20-48 场再跑真实评估、据此调风格系数。
+- **依赖**：足够已结束比赛（生产环境核实）。
+
+---
+
+### P0-3-补 · `fix/knockout-score-writeback`（待派工，新发现的缺口）
+- **目的**：`score-writeback.js`（P0-3）的机制本身没问题，但 2026-07-06/07 核实发现两层缺口：① `matches` 表播种函数 `seedRealGroups()`（[db.js:540](../lib/db.js:540)）一直未被调用，生产库该表长期为空——已由 PR #7 修复（启动时幂等补种）。② `seedRealGroups()` 只播种 12 个小组 **72 场小组赛**，`writebackMatchScore()` 是纯 UPDATE 语义（[score-writeback.js:99-104](../lib/services/score-writeback.js:99) 查不到行直接返回 `match_not_found`，不插入），**淘汰赛阶段的比赛没有任何机制往 `matches` 表插入对应行，回写会持续静默失败**——决赛 7-19，这个缺口现在每天都在发生。
+- **推荐方案**：不新增"淘汰赛播种 job"，改为让 `writebackMatchScore()` 在查不到匹配行时走 upsert（用已验证过的 `resolveTeamToRatingsId()` 结果直接 `INSERT`，`group_id=NULL`、`played=1`、真实终场比分），理由：不用额外维护"何时该播种哪场淘汰赛"的调度逻辑，且顺带解决"淘汰赛历史场次数据缺失"——重新跑一遍 `scripts/sync_completed_matches.js`（带够大的 `daysBack`）即可回填。如果实现者认为反过来（提前从 bracket JSON 播种赛程）更合适，需要先跟需求方确认，两条路径都可行但影响别处怎么查这张表。
+- **边界**：IN = upsert 逻辑 + `stage` 透传 + 回归测试；OUT = 不改小组赛现有 UPDATE 路径行为（`test-score-writeback.js` 现有用例必须照旧全绿）、不新建播种 job、不改 `resolveTeamToRatingsId()`。
+- **前置核实**：① `lib/jobs/moment-sync.js:224` 调用 `writebackMatchScore()` 时 `m`/`fifaMatch` 有没有现成的轮次/阶段字段可透传，不确定就先打印真实淘汰赛数据看结构。② `group_id=NULL` 插入在 `foreign_keys=ON` 下是否真的不报错（NULL 天然豁免 FK 检查，但要跑一次真实验证）。③ 新增的 `(group_id, match_number)` 唯一索引（PR #7）对多行 `group_id=NULL` 是否冲突（SQLite 唯一索引里 NULL 互不冲突，允许多行，但要写测试验证不要假设）。
+- **核查**：新增回归测试验证"两支从未在 `matches` 表出现过的球队"的淘汰赛终场比分调用能成功插入新行；同一场重复回写幂等不重复插入；现有 `test-score-writeback.js`（6 用例）保持全绿；手动验证一场已结束的真实淘汰赛比赛，确认插入后 `matches` 表里 `stage` 字段有意义。
+- **依赖**：建议先合并 PR #7，避免同时改 `lib/db.js`/`score-writeback.js` 邻近逻辑造成不必要冲突。
 
 ---
 

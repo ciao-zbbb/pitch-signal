@@ -26,7 +26,7 @@
 | Pressure Index 后端 + 前端 | `lib/services/pressure-index.js`, `static/js/match-renderers.js` | — |
 | Match Moments 引擎 | `lib/services/moment-detector.js`, `lib/jobs/moment-sync.js` | — |
 | FIFA API 桥接 | `lib/services/fifa-api.js`, `scripts/build-fifa-match-bridge.js` | — |
-| xG 框架（等 key） | `lib/services/xg-service.js`, `lib/jobs/xg-collector.js` | 仍空转，见 P4-2 后续 |
+| xG 框架 | `lib/services/xg-service.js`, `lib/jobs/xg-collector.js` | 🟡 仍空转，但原因变了（2026-07-04 核实）：已配置真实 `API_FOOTBALL_KEY` 并实测——key 有效、`league=1`（World Cup）参数确认正确（2022 赛季能拉到 Qatar vs Ecuador 等真实赛程），但 API 直接返回 `errors:{"plan":"Free plans do not have access to this season, try from 2022 to 2024."}`——**免费层不含 2026 赛季数据，本届世界杯期间免费 key 实际拿不到任何数据**，需升级付费计划才能真正解锁，不只是"配个 key"这么简单 |
 | 置信区间输出 | `lib/prediction.js` → `calcConfidenceInterval()` | — |
 | 概率走势线 / 三色胜率弧形 / 出线概率 / bracket 点击 / 角球模型 / 赔率采集 | 同 v2 | — |
 | **回测样本扩容至 964 场（1930-2022 全部世界杯）+ Elo 全历史热启动** ⓝ³ | `data/history/worldcup_*.json`, `data/elo-seed.json`, `lib/backtest.js`, `scripts/{fetch-worldcup-history,build-elo-seed}.js` | commit `fbb5713`+`8ec3172`+`761c2d2`+`4e6ca76`；方向准确率 42.19%→57.88% [95% CI 54.8-61.1%]，与业界 Elo 基线重叠；三方独立审计（数据对账/泄漏检查+独立复算/引用数字核查）通过 |
@@ -45,11 +45,11 @@
 |---|---|---|
 | P0-1 FIFA-API 容错 + schema 校验 | ✅ | `lib/services/fifa-api.js:51-119`（schema 校验 + 缓存降级 + stale 标记） |
 | P0-2 `/health` 增强 | ✅ | `lib/routes/health.js:8-38`（FIFA 连通状态 + job 时间戳） |
-| P0-3 终场比分回写 job | ✅ | `lib/services/score-writeback.js:57-100` + `moment-sync.js:199-223` |
+| P0-3 终场比分回写 job | 🟡 机制本身完成，但发现遗留缺口（2026-07-06/07 核实） | `lib/services/score-writeback.js:57-100` + `moment-sync.js:199-223`。**发现两个问题**：① `matches` 表播种函数 `seedRealGroups()` 一直没被调用，生产库该表长期为空，回写永远查不到行——PR #7（`fix/matches-seed-surge`）已修，启动时自动补种。② `seedRealGroups()` 只播种 12 个小组 72 场**小组赛**，score-writeback 是纯 UPDATE 语义（查不到行直接 `match_not_found`，不插入），**淘汰赛阶段的比赛仍然没有对应行，回写会继续静默失败**（决赛 7-19 前每天都在发生）——待派工，规格见 [EXECUTION_GUIDE.md](EXECUTION_GUIDE.md) P0-3-补 一节。 |
 | P0-4 实时比分条 + 状态机 | ✅ | `lib/db.js:308-327`（match_live_stats schema）+ `live-state-machine.js` |
 | P0-5 关键路径 try/catch + 日志 | ✅ | `lib/logger.js` + 各 job 的 `safeExec` 用法 |
 
-无遗留项。
+淘汰赛比分回写缺口待补（见上 P0-3），其余无遗留项。
 
 ---
 
@@ -70,7 +70,7 @@
 | 项 | 状态 | 说明 |
 |---|---|---|
 | P2-1 换人影响追踪 | ✅ 完成 | 取换人前后 10 分钟 Pressure Index，以每侧至少 3 个快照计算线性回归斜率差，写入 `match_moments.raw_json.substitution_impact`；Bench 展示 ↑/↓/→，不足明确标记。 |
-| P2-2 PWA 推送（进球推送） | ✅ **完成**（commit `ab2b030`，分支 `p2/pwa-push`，2026-07-02，已核实） | `web-push` 真实发送 + 404/410 失效订阅自动清理；`selectPushableGoals()` 用时间窗口+DB查重双重保险防重启补发历史进球；sw.js push/notificationclick + 前端订阅入口 + hash 深链全链路打通；`test-pwa-push.js`（15断言）+ 全量 35 suites/481 asserts 独立复核通过；本地起服务器实测 `/api/push/public-key`(503)/`/api/push/subscribe`(400/200 且真实写入 SQLite) 全部符合预期，页面按钮正确反映真实 `Notification.permission`。**唯一剩余**：Railway 部署 `VAPID_PUBLIC_KEY`/`VAPID_PRIVATE_KEY` 后的真机送达验收（本机无法测，`.env.example` 已登记这两个变量） |
+| P2-2 PWA 推送（进球推送） | 🟡 代码+生产部署已完成，**真机送达验收待做**（2026-07-04）| `web-push` 真实发送 + 404/410 失效订阅自动清理；`selectPushableGoals()` 双重防重放；sw.js push/notificationclick + hash 深链全链路打通；`test-pwa-push.js` + 全量测试通过。**2026-07-04 生产部署核实**：Railway GitHub redeploy `0acf97b4` 已上线，`VAPID_PUBLIC_KEY`/`VAPID_PRIVATE_KEY`/`VAPID_SUBJECT` 已配置，远程直接验证 `/health` healthy、`/api/push/public-key` 返回真实公钥、`/api/push/subscribe` 空 body 正确 400。**唯一剩余**：还没有真实进球场景下的真机送达验证（订阅 → 收到通知 → 点击跳转对应比赛），需等一场有进球的比赛做一次端到端验收 |
 | P2-3 市场赔率分歧展示 | ✅ 完成 | 见上「已完成」 |
 | P2-4 用户预测 vs 模型 | ✅ 完成 | 见上「已完成」 |
 | P2-5 新闻/伤停注入 TeamContext | ✅ 完成 | 见上「已完成」，依赖 `TAVILY_API_KEY` 是否配置 |
@@ -82,12 +82,12 @@
 
 | 项 | 状态 | 说明 |
 |---|---|---|
-| P3-1 Track B 压力指数校准 | ❌ 未做 | 待有效样本量后再做，等赛事推进 |
-| P3-2 Calibration 校准报告面板 | ❌ 未做，**与 P4-4 合并** | 见下 P4-4，范围扩大（不只是展示面板，还要做 Platt 校准修正） |
-| P3-3 点球专项模型 | ❌ 未做 | 保持原计划，低优先 |
-| P3-4 阵容 CI 动态收窄 | 🟡 部分（`lineupUncertainty` 已接但无数据源驱动） | 保持原计划 |
+| P3-1 Track B 压力指数校准 | 🟡 检测 bug 已修（PR #7），分析待做 | `sustained_pressure_alert` 此前因 `detectSurge` 严格连续计数漏报，生产实测长期为 0 条；PR #7 改滑动窗口（近 5 快照≥3 个≥65）+ 补"期间未进球"否决后已解锁，样本会开始积累。真正的置换检验分析仍未跑（需等生产样本量达标，去生产库核实，别信本地库） |
+| P3-2 Calibration 校准报告面板 | ✅ 已完成（2026-07-06 核实） | `lib/backtest-calibration.js`（`fitPlatt()` + `buildCalibrationReport()`）+ `lib/routes/calibration.js`（`GET /api/calibration-report`），`scripts/test-calibration-report.js` 通过（含样本不足时 Platt 正确标记 unavailable 的断言） |
+| P3-3 点球专项模型 | ✅ 已完成，PR 待合并（[#5](https://github.com/ciao-zbbb/pitch-signal/pull/5)） | 历史点球命中率（76 队，RSSSF）替换 `live-reprice.js` 硬编码 50/50；`test-penalty-model.js`（19 断言）通过 |
+| P3-4 阵容 CI 动态收窄 | ✅ 已完成，PR 待合并（[#6](https://github.com/ciao-zbbb/pitch-signal/pull/6)） | `PredictionService.predictMatch()` 查 `lineups-source.js` 的 `getLineups()` 判定首发是否公布，接入 `lineupUncertainty`；`test-lineup-ci.js`（8 断言）通过 |
 | P3-5 回测样本扩充 | ✅ **已完成，但路径与原计划不同** | 原计划是"混入 Euro/Copa 到 300+ 场"；实际做法是全量 1930-2022 世界杯正赛 964 场（openfootball，CC0）+ martj42 49k 场用于 Elo 热启动，不混赛事等级做评估——这是三方研究交叉验证过的更优方案（详见 [prediction-methodology-review.md](prediction-methodology-review.md)）。**Euro/Copa 继续导入进正赛评估集仍是可选加强项，非阻塞，价值有限**（964 场 CI 已经和业界基线重叠） |
-| P3-6 角球准确率回测 | ❌ 未做，等数据（20-48场） | 保持原计划 |
+| P3-6 角球准确率回测 | 🟡 框架已完成，PR 待合并（[#4](https://github.com/ciao-zbbb/pitch-signal/pull/4)），真实数据评估待样本量达标 | `lib/corner-model.js` 提取角球预测公式为独立模块；`test-corner-backtest.js` 五段评估（单元/真实DB/合成/敏感度/边界）；合成数据 MAE 1.90 < 2.0 目标，但真实评估仍等 20-48 场生产完赛数据 |
 
 ---
 
