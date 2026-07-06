@@ -35,7 +35,7 @@
 | `p3/track-b-calibration` | P3-1 压力校准 |
 | `p3/calibration-panel` | P3-2 校准报告面板 |
 | `p3/penalty-model` | P3-3 点球模型 |
-| `p3/lineup-ci` | P3-4 阵容 CI |
+| ~~`p3/lineup-ci`~~ | P3-4 阵容 CI —— ✅ 已完成（PR 待合并），见下方 P3-4 说明 |
 | `p3/backtest-expansion` | P3-5 回测样本 + param-sweep |
 | `p3/corner-backtest` | P3-6 角球准确率回测 |
 | `chore/a11y` | 贯穿 a11y/色盲 |
@@ -244,13 +244,12 @@
 - **核查**：两队命中率不同则概率非 50/50 且方向正确；缺数据回退 0.5。
 - **依赖**：无。
 
-### P3-4 · `p3/lineup-ci`
-- **目的**：`calcConfidenceInterval()` 已吃 `lineupUncertainty`（[prediction.js:427](../lib/prediction.js:427)），缺数据源驱动。
-- **方式**：**先核实**首发确认值存于何表/字段（`lineups-sync.js` 已在赛前 50 分钟同步，但 `pre_match_snapshots.has_confirmed_lineup` 未见于 schema）；建立后换算成 `lineupUncertainty` 传入预测链路。
-- **边界**：IN = 数据源对接 + 传参；OUT = 不改 CI 公式系数本身。
-- **前置核实**：**关键**——lineup 确认状态当前是否落库、落在哪。
-- **核查**：首发公布后该场 CI 收窄、未公布时维持宽。
-- **依赖**：lineups-sync 数据落库情况。
+### ~~P3-4 · `p3/lineup-ci`~~（✅ 已完成，2026-07-06）
+- **目的**：`calcConfidenceInterval()` 已吃 `lineupUncertainty`（[prediction.js:456-473](../lib/prediction.js:456)），但此前没有任何调用方真正传值，永远走默认值 0。
+- **实现**：`lib/services/PredictionService.js` 在 `predictMatch()` 里查一次 `lineups-source.js` 的 `getLineups(matchId)`——`homeXI`/`awayXI` 都非空 → 首发已公布，`lineupUncertainty=0`；否则 `=1`；显式传入 `engine.predictWithAI/predictWithMarket`。`lib/prediction.js` 的 `predict()` 内保留同一逻辑作为**兜底**，只服务于绕过 `PredictionService`、直接调用 `engine.predict()` 的调用方（测试脚本、离线工具），两处失败兜底方向已统一为"未确认"（`lineupUncertainty=1`，CI 偏宽，不假装已确认）。
+- **边界**：IN = 数据源对接 + 传参；OUT = 不改 CI 公式系数本身（`* 0.05`）。
+- **核查**：`scripts/test-lineup-ci.js`（8 项断言）覆盖直接传参、`matchId` 自动联动 `lineups-source.js`、`PredictionService.predictMatch` 完整链路三层，验证首发公布后 CI 半宽变窄；`npm test` 全绿。
+- **依赖**：无，`lineups-source.js` 数据源已就绪。
 
 ### P3-5 · `p3/backtest-expansion`
 - **目的**：[backtest-backlog.md:5](backtest-backlog.md:5) 仅 128 场，显著性不足；`param-sweep.js` 无上线工作流。
