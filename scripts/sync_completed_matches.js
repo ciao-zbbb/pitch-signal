@@ -229,6 +229,14 @@ function syncToDb(completedMatches) {
 }
 
 async function main() {
+  // 确保 matches 表已有赛程：findMatch 依赖其存在，否则同步会静默 matched:0
+  try {
+    const { groups } = require('../lib/db');
+    groups.seedRealGroups();
+  } catch (e) {
+    console.warn(`Schedule seeding skipped: ${e.message}`);
+  }
+
   const daysBack = Number.parseInt(process.argv[2] || '14', 10);
   const completedMatches = await fetchCompletedMatches(Number.isFinite(daysBack) ? daysBack : 14);
   const result = syncToDb(completedMatches);
