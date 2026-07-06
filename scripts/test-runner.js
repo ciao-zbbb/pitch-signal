@@ -59,6 +59,8 @@ const TEST_FILES = [
   'test-pwa-push.js',
   'test-user-predictions.js',
   'test-teamcontext-news.js',
+  // P3 专项测试
+  'test-penalty-model.js',
   // P4 专项测试
   'test-continental-strength-signal.js',
   'test-market-value-signal.js',

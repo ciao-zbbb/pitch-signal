@@ -34,7 +34,7 @@
 | `p2/bot-kb` | P2-6 Bot 知识库 |
 | `p3/track-b-calibration` | P3-1 压力校准 |
 | `p3/calibration-panel` | P3-2 校准报告面板 |
-| `p3/penalty-model` | P3-3 点球模型 |
+| ~~`p3/penalty-model`~~ | P3-3 点球模型 —— ✅ 已完成（PR 待合并），见下方 P3-3 说明 |
 | `p3/lineup-ci` | P3-4 阵容 CI |
 | `p3/backtest-expansion` | P3-5 回测样本 + param-sweep |
 | `p3/corner-backtest` | P3-6 角球准确率回测 |
@@ -236,12 +236,12 @@
 - **核查**：已知样本手算 Brier 与接口一致；校准曲线 SVG 渲染。
 - **依赖**：P0-3（实际结果）。
 
-### P3-3 · `p3/penalty-model`
-- **目的**：点球当前 50/50 对称假设。
-- **方式**：整理历史点球命中率 → `data/penalty-shootout-stats.json`；改 `live-reprice.js` 的 `penaltyHomeWin` 用队伍历史命中率。
-- **边界**：IN = 数据 + 命中率替换；OUT = 不改加时/常规时间逻辑。
-- **前置核实**：`penaltyHomeWin` 现有计算位置。
-- **核查**：两队命中率不同则概率非 50/50 且方向正确；缺数据回退 0.5。
+### ~~P3-3 · `p3/penalty-model`~~（✅ 已完成，2026-07-06）
+- **目的**：点球大战当前是硬编码对称假设。
+- **实现**：`data/penalty-shootout-stats.json` 收录 76 支球队历史点球命中率（来源 RSSSF）；`lib/live-reprice.js` 新增 `getPenaltyConversionRate()` + `penaltyShootoutWinProb()`（标准 5 轮 + 突然死亡独立 Bernoulli 模型），替换原硬编码 `penaltySkillHome/Away = 0.5`；显式传入时仍优先（保留旧调用/测试兼容），否则按 `homeTeamCode`/`awayTeamCode` 查历史命中率计算，`penHome + penAway` 恒为 1。
+- **调用方接入**：`lib/routes/prediction.js`（`getTeamCodesForMatch()`）、`lib/jobs/moment-sync.js` 均已传入双方代码；`lib/backtest.js` 的历史回测调用未传 `matchId`，不触碰新逻辑，无回测数据泄漏风险。
+- **边界**：IN = 数据整理 + 命中率替换默认值；OUT = 不改常规时间/加时赛的 Poisson 逻辑，只改点球大战这一段；缺数据优雅回退到 0.5。
+- **核查**：`scripts/test-penalty-model.js`（19 项断言）验证对称输入=0.5、命中率不同方向正确、缺数据回退、显式 override 优先级、常规时间不受影响；`npm test` 全绿。
 - **依赖**：无。
 
 ### P3-4 · `p3/lineup-ci`
